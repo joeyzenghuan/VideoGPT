@@ -1,4 +1,4 @@
-import ytdl from "ytdl-core";
+import ytdl from "@distube/ytdl-core";
 
 export interface VideoMetadata {
   videoId: string;
@@ -11,22 +11,28 @@ export interface VideoMetadata {
 
 export async function extractVideoMetadata(youtubeUrl: string): Promise<VideoMetadata> {
   try {
+    console.log("Validating YouTube URL:", youtubeUrl);
+    
     if (!ytdl.validateURL(youtubeUrl)) {
       throw new Error("Invalid YouTube URL");
     }
 
     const videoId = ytdl.getVideoID(youtubeUrl);
+    console.log("Extracted video ID:", videoId);
+    
+    console.log("Fetching video info...");
     const info = await ytdl.getInfo(videoId);
     
     const details = info.videoDetails;
+    console.log("Video title:", details.title);
     
     return {
       videoId,
       title: details.title,
       channel: details.author.name,
       duration: parseInt(details.lengthSeconds),
-      publishDate: details.publishDate,
-      thumbnailUrl: details.thumbnails[details.thumbnails.length - 1]?.url || "",
+      publishDate: details.publishDate || new Date().toISOString(),
+      thumbnailUrl: details.thumbnails[details.thumbnails.length - 1]?.url || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
     };
   } catch (error) {
     console.error("Error extracting video metadata:", error);
