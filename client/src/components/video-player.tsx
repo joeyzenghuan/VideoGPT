@@ -14,6 +14,8 @@ const VideoPlayer = React.forwardRef<{ jumpToTime: (time: number) => void }, Vid
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -32,7 +34,41 @@ const VideoPlayer = React.forwardRef<{ jumpToTime: (time: number) => void }, Vid
 
   const handlePlayPause = () => {
     setIsPlaying(!isPlaying);
-    // In a real implementation, this would control the actual video player
+    // Try to control YouTube iframe
+    const iframe = document.querySelector('iframe[data-testid="youtube-iframe"]') as HTMLIFrameElement;
+    if (iframe && iframe.contentWindow) {
+      try {
+        if (isPlaying) {
+          iframe.src = iframe.src.replace('&autoplay=1', '&autoplay=0');
+        } else {
+          iframe.src = iframe.src.includes('&autoplay=1') ? iframe.src : iframe.src + '&autoplay=1';
+        }
+      } catch (error) {
+        console.log('Could not control iframe playback');
+      }
+    }
+  };
+
+  const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const newProgress = (clickX / rect.width) * 100;
+    const newTime = (newProgress / 100) * analysis.duration;
+    
+    setProgress(newProgress);
+    jumpToTime(newTime);
+  };
+
+  const handleProgressDrag = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDragging) return;
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const dragX = e.clientX - rect.left;
+    const newProgress = Math.max(0, Math.min(100, (dragX / rect.width) * 100));
+    const newTime = (newProgress / 100) * analysis.duration;
+    
+    setProgress(newProgress);
+    onTimeUpdate?.(newTime);
   };
 
   const jumpToTime = (time: number) => {
@@ -71,8 +107,17 @@ const VideoPlayer = React.forwardRef<{ jumpToTime: (time: number) => void }, Vid
             title={analysis.title}
           />
           
-          {/* Video overlay with direct YouTube link */}
-          <div className="absolute top-4 right-4 z-10">
+          {/* Video overlay controls */}
+          <div className="absolute top-4 right-4 z-10 flex gap-2">
+            {!showOverlay && (
+              <button
+                onClick={() => setShowOverlay(true)}
+                className="bg-slate-600 hover:bg-slate-700 text-white px-3 py-1 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-1"
+                data-testid="button-show-overlay"
+              >
+                📱 显示帮助
+              </button>
+            )}
             <a 
               href={analysis.youtubeUrl}
               target="_blank"
@@ -83,11 +128,12 @@ const VideoPlayer = React.forwardRef<{ jumpToTime: (time: number) => void }, Vid
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
               </svg>
-              在YouTube观看
+              YouTube
             </a>
           </div>
           
-          {/* Help overlay - only shows when iframe might be blocked */}
+          {/* Help overlay - only shows when enabled */}
+          {showOverlay && (
           <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/95 to-slate-800/95 backdrop-blur-sm" data-testid="video-overlay">
             <div className="text-center text-white max-w-lg p-8">
               <img 
@@ -126,10 +172,7 @@ const VideoPlayer = React.forwardRef<{ jumpToTime: (time: number) => void }, Vid
                   在YouTube观看
                 </a>
                 <button 
-                  onClick={() => {
-                    const overlay = document.querySelector('[data-testid="video-overlay"]') as HTMLElement;
-                    if (overlay) overlay.style.display = 'none';
-                  }}
+                  onClick={() => setShowOverlay(false)}
                   className="inline-flex items-center justify-center gap-2 bg-slate-600 hover:bg-slate-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
                   data-testid="button-hide-overlay"
                 >
@@ -138,6 +181,7 @@ const VideoPlayer = React.forwardRef<{ jumpToTime: (time: number) => void }, Vid
               </div>
             </div>
           </div>
+          )}
           
           {/* Custom controls overlay */}
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4 opacity-0 hover:opacity-100 transition-opacity">
@@ -159,7 +203,15 @@ const VideoPlayer = React.forwardRef<{ jumpToTime: (time: number) => void }, Vid
                 <span className="text-sm" data-testid="text-current-time">
                   {formatTime(currentTime || 0)}
                 </span>
-                <div className="flex-1 h-1 bg-white/30 rounded-full">
+                <div 
+                  className="flex-1 h-1 bg-white/30 rounded-full cursor-pointer"
+                  onClick={handleProgressClick}
+                  onMouseMove={handleProgressDrag}
+                  onMouseDown={() => setIsDragging(true)}
+                  onMouseUp={() => setIsDragging(false)}
+                  onMouseLeave={() => setIsDragging(false)}
+                  data-testid="progress-container"
+                >
                   <div 
                     className="h-full bg-red-600 rounded-full transition-all duration-300"
                     style={{ width: `${progress}%` }}
