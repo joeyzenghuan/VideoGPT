@@ -21,10 +21,13 @@ export function SummaryPanel({ analysis, onJumpToTime }: SummaryPanelProps) {
 
   const handleTimeClick = (time: number) => {
     onJumpToTime(time);
+    // Also provide direct YouTube link as fallback
+    console.log(`Jumping to ${formatTime(time)} in video`);
   };
 
   const handleSubtitleClick = (subtitle: { start: number }) => {
     onJumpToTime(subtitle.start);
+    console.log(`Jumping to ${formatTime(subtitle.start)} from subtitle`);
   };
 
   return (
@@ -63,13 +66,23 @@ export function SummaryPanel({ analysis, onJumpToTime }: SummaryPanelProps) {
               <div className="flex items-start space-x-4">
                 {/* Thumbnail */}
                 <div className="flex-shrink-0">
-                  <img 
-                    src={segment.screenshotUrl || `https://img.youtube.com/vi/${analysis.videoId}/mqdefault.jpg`}
-                    alt={`Video thumbnail at ${formatTime(segment.startTime)}`}
-                    className="w-20 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                  <div 
+                    className="w-20 h-12 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center cursor-pointer hover:from-blue-600 hover:to-blue-700 transition-all shadow-md relative overflow-hidden"
                     onClick={() => handleTimeClick(segment.startTime)}
                     data-testid={`img-thumbnail-${index}`}
-                  />
+                  >
+                    <img 
+                      src={`https://img.youtube.com/vi/${analysis.videoId}/mqdefault.jpg`}
+                      alt={`Video at ${formatTime(segment.startTime)}`}
+                      className="absolute inset-0 w-full h-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                    <div className="relative z-10 text-white text-xs font-medium bg-black/50 px-2 py-1 rounded">
+                      {formatTime(segment.startTime)}
+                    </div>
+                  </div>
                 </div>
                 <div className="flex-1 min-w-0">
                   {/* Timestamp */}
