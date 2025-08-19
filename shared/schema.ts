@@ -52,6 +52,7 @@ export const insertVideoAnalysisSchema = createInsertSchema(videoAnalyses).omit(
 
 export const startAnalysisSchema = z.object({
   youtubeUrl: z.string().url(),
+  forceRegenerate: z.boolean().optional().default(false),
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;

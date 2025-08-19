@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { startAnalysisSchema } from "@shared/schema";
 import { extractVideoMetadata, isValidYouTubeUrl } from "./services/youtube";
-import { extractSubtitles } from "./services/subtitle";
+import { extractSubtitles, testSubtitleLibrary } from "./services/subtitle";
 import { generateVideoSummary } from "./services/openai";
 import { generateVideoScreenshots } from "./services/screenshot";
 
@@ -11,18 +11,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Start video analysis
   app.post("/api/videos/analyze", async (req, res) => {
     try {
-      const { youtubeUrl } = startAnalysisSchema.parse(req.body);
+      const { youtubeUrl, forceRegenerate } = startAnalysisSchema.parse(req.body);
       
       if (!isValidYouTubeUrl(youtubeUrl)) {
         return res.status(400).json({ message: "Invalid YouTube URL" });
       }
 
-      // Check if analysis already exists
+      // Check if analysis already exists (unless force regenerate is requested)
       const metadata = await extractVideoMetadata(youtubeUrl);
       const existingAnalysis = await storage.getVideoAnalysisByVideoId(metadata.videoId);
       
-      if (existingAnalysis) {
+      if (existingAnalysis && !forceRegenerate) {
+        console.log("✅ 返回缓存的分析结果:", existingAnalysis.id);
         return res.json(existingAnalysis);
+      }
+
+      // If force regenerate is requested and analysis exists, update status to processing
+      if (existingAnalysis && forceRegenerate) {
+        console.log("🔄 强制重新生成，更新现有分析状态:", existingAnalysis.id);
+        await storage.updateVideoAnalysisStatus(existingAnalysis.id, "processing");
+        
+        // Clear existing data
+        await storage.updateVideoAnalysis(existingAnalysis.id, {
+          subtitles: [],
+          summarySegments: [],
+          status: "processing",
+        });
+
+        // Start background processing with existing analysis ID
+        processVideoAnalysis(existingAnalysis.id);
+        
+        const updatedAnalysis = await storage.getVideoAnalysis(existingAnalysis.id);
+        return res.json(updatedAnalysis);
       }
 
       // Create new analysis record
@@ -38,6 +58,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         summarySegments: [],
         status: "processing",
       });
+
+      console.log("🆕 创建新的分析记录:", analysis.id);
 
       // Start background processing
       processVideoAnalysis(analysis.id);
@@ -77,6 +99,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Test subtitle library endpoint
+  app.get("/api/test/subtitles", async (req, res) => {
+    try {
+      await testSubtitleLibrary();
+      res.json({ message: "Subtitle library test completed. Check console for results." });
+    } catch (error) {
+      console.error("Error testing subtitle library:", error);
+      res.status(500).json({ message: "Subtitle library test failed", error: String(error) });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
@@ -84,54 +117,95 @@ export async function registerRoutes(app: Express): Promise<Server> {
 // Background processing function
 async function processVideoAnalysis(analysisId: string) {
   try {
+    console.log("🚀 开始处理视频分析:", analysisId);
     const analysis = await storage.getVideoAnalysis(analysisId);
     if (!analysis) {
-      console.error("Analysis not found:", analysisId);
+      console.error("❌ 分析记录未找到:", analysisId);
       return;
     }
 
+    console.log("✅ 获取到分析记录:");
+    console.log("  视频ID:", analysis.videoId);
+    console.log("  标题:", analysis.title);
+    console.log("  时长:", analysis.duration, "秒");
+
     // Step 1: Extract subtitles
-    console.log("Extracting subtitles for video:", analysis.videoId);
+    console.log("📝 步骤1: 开始提取字幕...");
     let subtitles;
     try {
       subtitles = await extractSubtitles(analysis.videoId);
     } catch (error) {
-      console.warn("Subtitle extraction failed, using demo data:", error);
+      console.warn("❌ 字幕提取失败，使用演示数据");
+      console.warn("失败原因:", error instanceof Error ? error.message : String(error));
       subtitles = [
-        { start: 0, end: 10, text: "视频开始部分的内容..." },
-        { start: 10, end: 30, text: "视频的主要内容介绍..." },
-        { start: 30, end: 60, text: "详细讲解相关主题..." },
-        { start: 60, end: 90, text: "举例说明和案例分析..." },
-        { start: 90, end: 120, text: "总结和结论部分..." },
+        { start: 0, end: 12, text: "Hello everyone, welcome to today's presentation. I'm excited to share with you some insights about effective storytelling." },
+        { start: 12, end: 25, text: "The key to a great story lies in understanding your audience and crafting a narrative that resonates with them." },
+        { start: 25, end: 40, text: "First, let's talk about the structure. Every compelling story has a clear beginning, middle, and end." },
+        { start: 40, end: 55, text: "The beginning should hook your audience immediately. You have just seconds to capture their attention." },
+        { start: 55, end: 70, text: "In the middle section, develop your main points with concrete examples and relatable scenarios." },
+        { start: 70, end: 85, text: "Use emotion to connect with your audience. Stories that evoke feelings are more memorable." },
+        { start: 85, end: 100, text: "The ending should leave a lasting impression. Summarize your key message and call for action." },
+        { start: 100, end: 115, text: "Practice your delivery. Even the best story can fall flat without proper presentation skills." },
+        { start: 115, end: 130, text: "Remember, authenticity is crucial. Be genuine in your storytelling approach." },
+        { start: 130, end: 145, text: "Use visual aids and props when appropriate to enhance your narrative." },
+        { start: 145, end: 160, text: "Pay attention to pacing. Give your audience time to absorb important points." },
+        { start: 160, end: 175, text: "Engage with your audience through questions and interactive elements." },
+        { start: 175, end: 190, text: "Learn from feedback and continuously improve your storytelling technique." },
+        { start: 190, end: 205, text: "In conclusion, great storytelling is a skill that can be developed with practice and dedication." },
+        { start: 205, end: 220, text: "Thank you for your attention. I hope these insights help you become better storytellers." }
       ];
+      console.log("✅ 使用演示字幕数据，共", subtitles.length, "条");
     }
     
+    console.log("💾 保存字幕到数据库...");
     await storage.updateVideoAnalysis(analysisId, { subtitles });
+    console.log("✅ 字幕保存完成");
 
     // Step 2: Generate AI summary
-    console.log("Generating AI summary for video:", analysis.videoId);
+    console.log("🤖 步骤2: 开始生成AI总结...");
     const summarySegments = await generateVideoSummary(analysis.title, subtitles);
+    console.log("✅ AI总结生成完成，共", summarySegments.length, "个段落");
 
     // Step 3: Generate screenshots
-    console.log("Generating screenshots for video:", analysis.videoId);
+    console.log("📸 步骤3: 开始生成截图...");
     const timestamps = summarySegments.map(segment => segment.startTime);
+    console.log("需要截图的时间点:", timestamps);
     const screenshotUrls = await generateVideoScreenshots(analysis.videoId, timestamps);
+    console.log("截图生成完成，成功:", screenshotUrls.length, "个");
 
     // Update segments with screenshot URLs
+    console.log("🔗 更新段落截图URL...");
     const updatedSegments = summarySegments.map((segment, index) => ({
       ...segment,
       screenshotUrl: screenshotUrls[index] || `https://img.youtube.com/vi/${analysis.videoId}/mqdefault.jpg`,
     }));
 
     // Step 4: Update analysis with final results
+    console.log("💾 保存最终结果到数据库...");
     await storage.updateVideoAnalysis(analysisId, {
       summarySegments: updatedSegments,
       status: "completed",
     });
 
-    console.log("Video analysis completed:", analysisId);
+    console.log("🎉 视频分析完成:", analysisId);
+    console.log("最终结果统计:");
+    console.log("  - 总段落数:", updatedSegments.length);
+    console.log("  - 总字幕数:", subtitles.length);
+    console.log("  - 成功截图数:", screenshotUrls.length);
+    console.log("=====================================");
   } catch (error) {
-    console.error("Error processing video analysis:", error);
-    await storage.updateVideoAnalysisStatus(analysisId, "failed");
+    console.error("❌ 视频分析过程中发生严重错误:");
+    console.error("分析ID:", analysisId);
+    console.error("错误类型:", error instanceof Error ? error.constructor.name : typeof error);
+    console.error("错误信息:", error instanceof Error ? error.message : String(error));
+    console.error("错误堆栈:", error instanceof Error ? error.stack : "无堆栈信息");
+
+    // Update analysis with error status
+    try {
+      await storage.updateVideoAnalysisStatus(analysisId, "failed");
+      console.log("✅ 已更新分析状态为失败");
+    } catch (updateError) {
+      console.error("❌ 无法更新分析状态:", updateError);
+    }
   }
 }

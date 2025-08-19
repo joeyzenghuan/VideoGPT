@@ -15,8 +15,8 @@ export default function Home() {
   const [currentTime, setCurrentTime] = useState(0);
   const videoPlayerRef = useRef<{ jumpToTime: (time: number) => void }>(null);
 
-  const handleStartAnalysis = (url: string) => {
-    startAnalysis(url);
+  const handleStartAnalysis = (url: string, forceRegenerate?: boolean) => {
+    startAnalysis(url, forceRegenerate);
   };
 
   const handleJumpToTime = (time: number) => {

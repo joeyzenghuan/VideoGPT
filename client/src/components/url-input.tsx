@@ -1,25 +1,27 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Play } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Play, RefreshCw } from "lucide-react";
 
 interface UrlInputProps {
-  onStartAnalysis: (url: string) => void;
+  onStartAnalysis: (url: string, forceRegenerate?: boolean) => void;
   isLoading: boolean;
 }
 
 export function UrlInput({ onStartAnalysis, isLoading }: UrlInputProps) {
   const [url, setUrl] = useState("");
+  const [forceRegenerate, setForceRegenerate] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (url.trim()) {
-      onStartAnalysis(url.trim());
+      onStartAnalysis(url.trim(), forceRegenerate);
     }
   };
 
   const fillExample = () => {
-    setUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    setUrl("https://www.youtube.com/watch?v=ZmNpeXTj2c4");
   };
 
   return (
@@ -63,19 +65,40 @@ export function UrlInput({ onStartAnalysis, isLoading }: UrlInputProps) {
               className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all font-medium"
               data-testid="button-start-analysis"
             >
-              <Play className="w-4 h-4 mr-2" />
-              开始分析
+              {forceRegenerate ? (
+                <RefreshCw className="w-4 h-4 mr-2" />
+              ) : (
+                <Play className="w-4 h-4 mr-2" />
+              )}
+              {forceRegenerate ? "重新生成" : "开始分析"}
             </Button>
           </form>
           
-          <div className="mt-6 flex flex-wrap gap-2">
+          {/* Force regenerate option */}
+          <div className="mt-4 flex items-center space-x-2">
+            <Checkbox
+              id="force-regenerate"
+              checked={forceRegenerate}
+              onCheckedChange={(checked) => setForceRegenerate(checked as boolean)}
+              disabled={isLoading}
+              className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+            />
+            <label
+              htmlFor="force-regenerate"
+              className="text-sm text-slate-600 cursor-pointer select-none"
+            >
+              忽略缓存，重新生成分析结果
+            </label>
+          </div>
+          
+          <div className="mt-4 flex flex-wrap gap-2">
             <span className="text-sm text-slate-500">示例:</span>
             <button 
               onClick={fillExample}
               className="text-sm text-blue-600 hover:text-blue-800 underline"
               data-testid="button-fill-example"
             >
-              https://www.youtube.com/watch?v=dQw4w9WgXcQ
+              https://www.youtube.com/watch?v=ZmNpeXTj2c4
             </button>
           </div>
         </div>

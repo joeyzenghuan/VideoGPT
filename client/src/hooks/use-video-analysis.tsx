@@ -8,8 +8,11 @@ export function useVideoAnalysis() {
   const [analysisState, setAnalysisState] = useState<AnalysisState>("input");
 
   const startAnalysisMutation = useMutation({
-    mutationFn: async (youtubeUrl: string) => {
-      const response = await apiRequest("POST", "/api/videos/analyze", { youtubeUrl });
+    mutationFn: async ({ youtubeUrl, forceRegenerate }: { youtubeUrl: string; forceRegenerate?: boolean }) => {
+      const response = await apiRequest("POST", "/api/videos/analyze", { 
+        youtubeUrl,
+        forceRegenerate: forceRegenerate || false
+      });
       return response.json() as Promise<VideoAnalysis>;
     },
     onSuccess: (data) => {
@@ -44,11 +47,15 @@ export function useVideoAnalysis() {
     setAnalysisState("input");
   };
 
+  const startAnalysis = (youtubeUrl: string, forceRegenerate?: boolean) => {
+    startAnalysisMutation.mutate({ youtubeUrl, forceRegenerate });
+  };
+
   return {
     analysisState,
     analysisData,
     isLoading: startAnalysisMutation.isPending || isLoading,
-    startAnalysis: startAnalysisMutation.mutate,
+    startAnalysis,
     startNewAnalysis,
     error: startAnalysisMutation.error,
   };

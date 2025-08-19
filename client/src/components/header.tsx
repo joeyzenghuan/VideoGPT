@@ -19,10 +19,10 @@ export function Header() {
             </div>
             <div>
               <h1 className="text-xl font-semibold text-slate-800" data-testid="title">
-                视频智能总结器
+                VideoGPT
               </h1>
               <p className="text-sm text-slate-600" data-testid="subtitle">
-                YouTube视频一键总结
+                AI视频智能分析器
               </p>
             </div>
           </div>
