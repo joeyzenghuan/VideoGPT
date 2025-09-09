@@ -1,4 +1,4 @@
-import { generateVideoScreenshots } from './server/services/screenshot-old.js';
+import { generateVideoScreenshots } from './server/services/screenshot.js';
 
 async function testScreenshotGeneration() {
   console.log('🧪 开始测试截图生成功能...\n');
