@@ -72,11 +72,17 @@ export function SummaryPanel({ analysis, onJumpToTime }: SummaryPanelProps) {
                     data-testid={`img-thumbnail-${index}`}
                   >
                     <img 
-                      src={`https://img.youtube.com/vi/${analysis.videoId}/mqdefault.jpg`}
+                      src={segment.screenshotUrl || `https://img.youtube.com/vi/${analysis.videoId}/mqdefault.jpg`}
                       alt={`Video at ${formatTime(segment.startTime)}`}
                       className="absolute inset-0 w-full h-full object-cover"
                       onError={(e) => {
-                        e.currentTarget.style.display = 'none';
+                        // 如果截图加载失败，回退到YouTube缩略图
+                        const img = e.currentTarget as HTMLImageElement;
+                        if (img.src !== `https://img.youtube.com/vi/${analysis.videoId}/mqdefault.jpg`) {
+                          img.src = `https://img.youtube.com/vi/${analysis.videoId}/mqdefault.jpg`;
+                        } else {
+                          img.style.display = 'none';
+                        }
                       }}
                     />
                     <div className="relative z-10 text-white text-xs font-medium bg-black/50 px-2 py-1 rounded">
