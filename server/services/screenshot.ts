@@ -1,16 +1,18 @@
 import path from "path";
 import fs from "fs";
 import { nanoid } from "nanoid";
-import puppeteer from "puppeteer";
+import ffmpeg from "fluent-ffmpeg";
+import { videoCache } from "./video-cache";
 
 export async function generateVideoScreenshots(
   videoId: string,
-  timestamps: number[]
+  timestamps: number[],
+  videoTitle: string
 ): Promise<string[]> {
   const screenshotUrls: string[] = [];
   
   try {
-    console.log("📸 使用Puppeteer开始生成视频截图...");
+    console.log("📸 使用FFmpeg开始生成视频截图...");
     console.log("需要截图的时间点:", timestamps);
     
     // Create screenshots directory if it doesn't exist
@@ -20,118 +22,45 @@ export async function generateVideoScreenshots(
       console.log("✅ 创建截图目录:", screenshotsDir);
     }
 
-    // Launch browser once for all screenshots
-    console.log("🚀 启动浏览器...");
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu'
-      ]
-    });
+    // Ensure video is downloaded and cached
+    console.log("� 确保视频已下载到本地...");
+    const cachedVideo = await videoCache.ensureVideoDownloaded(videoId, videoTitle);
     
-    try {
-      // Process each timestamp
-      for (let i = 0; i < timestamps.length; i++) {
-        const timestamp = timestamps[i];
-        console.log(`📸 处理时间戳 ${i + 1}/${timestamps.length}: ${timestamp}秒`);
-        
-        try {
-          const screenshotFilename = `screenshot_${videoId}_${timestamp}s_${nanoid(8)}.jpg`;
-          const screenshotPath = path.join(screenshotsDir, screenshotFilename);
-          
-          // Create new page for this screenshot
-          const page = await browser.newPage();
-          
-          try {
-            // Set viewport for consistent screenshots
-            await page.setViewport({ 
-              width: 1280, 
-              height: 720,
-              deviceScaleFactor: 1
-            });
-            
-            // Navigate to YouTube video at specific timestamp
-            const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}&t=${timestamp}s`;
-            console.log(`🌐 访问YouTube: ${youtubeUrl}`);
-            
-            await page.goto(youtubeUrl, { 
-              waitUntil: 'networkidle0', 
-              timeout: 30000 
-            });
-            
-            // Wait for video player to load
-            await page.waitForSelector('video', { timeout: 15000 });
-            console.log(`⏳ 等待视频加载到 ${timestamp} 秒...`);
-            
-            // Wait a bit for video to seek to the right position
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            
-            // Try to dismiss any overlays or ads
-            try {
-              // Skip ads if present
-              const skipButton = await page.$('.ytp-ad-skip-button, .ytp-skip-ad-button');
-              if (skipButton) {
-                await skipButton.click();
-                await new Promise(resolve => setTimeout(resolve, 1000));
-              }
-              
-              // Close any popups
-              const closeButtons = await page.$$('[aria-label="Close"], .ytp-ce-covering-overlay .ytp-ce-element-click-area');
-              for (const button of closeButtons) {
-                try {
-                  await button.click();
-                } catch (e) {
-                  // Ignore click errors
-                }
-              }
-            } catch (e) {
-              // Ignore overlay handling errors
-            }
-            
-            // Take screenshot of the video element
-            const videoElement = await page.$('video');
-            if (videoElement) {
-              await videoElement.screenshot({ 
-                path: screenshotPath,
-                type: 'jpeg',
-                quality: 85
-              });
-              
-              // Check if file was created successfully
-              if (fs.existsSync(screenshotPath)) {
-                const screenshotUrl = `/screenshots/${screenshotFilename}`;
-                screenshotUrls.push(screenshotUrl);
-                console.log(`✅ 时间戳 ${timestamp}s 截图已生成: ${screenshotFilename}`);
-              } else {
-                throw new Error("截图文件未生成");
-              }
-            } else {
-              throw new Error("未找到视频元素");
-            }
-            
-          } finally {
-            await page.close();
-          }
-          
-        } catch (error) {
-          console.error(`❌ 生成时间戳 ${timestamp}s 的截图时出错:`, error instanceof Error ? error.message : String(error));
-          
-          // Fallback to YouTube thumbnail for this timestamp
-          const fallbackUrl = await getFallbackThumbnail(videoId);
-          screenshotUrls.push(fallbackUrl);
-          console.log(`🔄 时间戳 ${timestamp}s 使用回退缩略图`);
-        }
-      }
+    if (!cachedVideo || !fs.existsSync(cachedVideo.localPath)) {
+      throw new Error("无法获取本地视频文件");
+    }
+
+    console.log("🎥 使用本地视频文件:", cachedVideo.fileName);
+
+    // Process each timestamp
+    for (let i = 0; i < timestamps.length; i++) {
+      const timestamp = timestamps[i];
+      console.log(`📸 处理时间戳 ${i + 1}/${timestamps.length}: ${timestamp}秒`);
       
-    } finally {
-      await browser.close();
-      console.log("🔄 浏览器已关闭");
+      try {
+        const screenshotFilename = `screenshot_${videoId}_${timestamp}s_${nanoid(8)}.jpg`;
+        const screenshotPath = path.join(screenshotsDir, screenshotFilename);
+        
+        // Generate screenshot using FFmpeg
+        await generateScreenshotWithFFmpeg(cachedVideo.localPath, timestamp, screenshotPath);
+        
+        // Check if file was created successfully
+        if (fs.existsSync(screenshotPath)) {
+          const screenshotUrl = `/screenshots/${screenshotFilename}`;
+          screenshotUrls.push(screenshotUrl);
+          console.log(`✅ 时间戳 ${timestamp}s 截图已生成: ${screenshotFilename}`);
+        } else {
+          throw new Error("截图文件未生成");
+        }
+        
+      } catch (error) {
+        console.error(`❌ 生成时间戳 ${timestamp}s 的截图时出错:`, error instanceof Error ? error.message : String(error));
+        
+        // Fallback to YouTube thumbnail for this timestamp
+        const fallbackUrl = await getFallbackThumbnail(videoId);
+        screenshotUrls.push(fallbackUrl);
+        console.log(`🔄 时间戳 ${timestamp}s 使用回退缩略图`);
+      }
     }
     
     console.log(`📸 截图生成完成，成功: ${screenshotUrls.length} 个`);
@@ -146,6 +75,34 @@ export async function generateVideoScreenshots(
       timestamps.map(() => getFallbackThumbnail(videoId))
     );
   }
+}
+
+// 使用FFmpeg生成截图
+async function generateScreenshotWithFFmpeg(
+  videoPath: string, 
+  timestamp: number, 
+  outputPath: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    ffmpeg(videoPath)
+      .seekInput(timestamp) // 跳转到指定时间
+      .frames(1) // 只提取一帧
+      .size('1280x720') // 设置输出尺寸
+      .output(outputPath)
+      .outputOptions([
+        '-q:v 2', // 设置JPEG质量 (1-31, 数值越小质量越好)
+        '-f image2' // 指定输出格式为图片
+      ])
+      .on('end', () => {
+        console.log(`📷 FFmpeg截图完成: ${timestamp}秒`);
+        resolve();
+      })
+      .on('error', (err) => {
+        console.error(`❌ FFmpeg截图失败 ${timestamp}秒:`, err.message);
+        reject(new Error(`FFmpeg截图失败: ${err.message}`));
+      })
+      .run();
+  });
 }
 
 // 获取回退缩略图
@@ -167,15 +124,14 @@ async function getFallbackThumbnail(videoId: string): Promise<string> {
   }
 }
 
-// 检查Puppeteer是否可用
-export async function checkPuppeteerAvailable(): Promise<boolean> {
-  try {
-    const browser = await puppeteer.launch({ headless: true });
-    await browser.close();
-    return true;
-  } catch (error) {
-    return false;
-  }
+// 检查FFmpeg是否可用
+export async function checkFFmpegAvailable(): Promise<boolean> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe('', (err) => {
+      // 如果能调用ffprobe，说明FFmpeg可用
+      resolve(!err || err.message.includes('Input #0'));
+    });
+  });
 }
 
 // 清理旧的截图文件（可选）

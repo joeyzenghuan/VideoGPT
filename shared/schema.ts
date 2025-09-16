@@ -21,6 +21,11 @@ export const videoAnalyses = pgTable("video_analyses", {
   subtitles: jsonb("subtitles").$type<SubtitleSegment[]>().notNull(),
   summarySegments: jsonb("summary_segments").$type<SummarySegment[]>().notNull(),
   status: text("status").notNull().default("processing"), // processing, completed, failed
+  // Video caching fields
+  localVideoPath: text("local_video_path"), // Path to cached video file
+  videoFileSize: integer("video_file_size"), // Size in bytes
+  videoCacheStatus: text("video_cache_status").default("not_cached"), // not_cached, caching, cached, failed
+  lastAccessedAt: timestamp("last_accessed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

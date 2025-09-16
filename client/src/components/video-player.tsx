@@ -1,5 +1,6 @@
 import React from "react";
 import { type VideoAnalysis } from "@/lib/types";
+import { useVideoCache } from "@/hooks/use-video-cache";
 
 interface VideoPlayerProps {
   analysis: VideoAnalysis;
@@ -9,6 +10,8 @@ interface VideoPlayerProps {
 
 const VideoPlayer = React.forwardRef<{ jumpToTime: (time: number) => void }, VideoPlayerProps>(
   ({ analysis, currentTime, onTimeUpdate }, ref) => {
+    
+  const { cacheInfo, isDownloading, downloadVideo } = useVideoCache(analysis.videoId);
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -59,8 +62,37 @@ const VideoPlayer = React.forwardRef<{ jumpToTime: (time: number) => void }, Vid
             title={analysis.title}
           />
           
-          {/* Video overlay controls - only show YouTube button */}
+          {/* Video overlay controls */}
           <div className="absolute top-4 right-4 z-10 flex gap-2">
+            {/* Download button */}
+            {cacheInfo.cached && (
+              <button
+                onClick={downloadVideo}
+                disabled={isDownloading}
+                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-3 py-1 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-1"
+                data-testid="button-download-video"
+                title="下载视频到本地"
+              >
+                {isDownloading ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="60" strokeDashoffset="60">
+                        <animateTransform attributeName="transform" type="rotate" dur="1s" repeatCount="indefinite" values="0 12 12;360 12 12"/>
+                      </circle>
+                    </svg>
+                    下载中...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                    </svg>
+                    下载
+                  </>
+                )}
+              </button>
+            )}
+            
             <a 
               href={analysis.youtubeUrl}
               target="_blank"
@@ -97,6 +129,14 @@ const VideoPlayer = React.forwardRef<{ jumpToTime: (time: number) => void }, Vid
                   <span data-testid="text-video-duration">{formatTime(analysis.duration)}</span>
                   <span>•</span>
                   <span data-testid="text-video-publish-date">{formatDate(analysis.publishDate)}</span>
+                  {cacheInfo.cached && (
+                    <>
+                      <span>•</span>
+                      <span className="text-green-600 font-medium" title="视频已缓存到服务器">
+                        📁 已缓存 {cacheInfo.fileSize ? `(${(cacheInfo.fileSize / 1024 / 1024).toFixed(1)}MB)` : ''}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

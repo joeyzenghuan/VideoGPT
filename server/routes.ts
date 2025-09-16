@@ -6,6 +6,7 @@ import { extractVideoMetadata, isValidYouTubeUrl } from "./services/youtube";
 import { extractSubtitles, testSubtitleLibrary } from "./services/subtitle";
 import { generateVideoSummary } from "./services/openai";
 import { generateVideoScreenshots } from "./services/screenshot";
+import { videoCache } from "./services/video-cache";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Start video analysis
@@ -99,6 +100,121 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Download cached video
+  app.get("/api/videos/download/:videoId", async (req, res) => {
+    try {
+      const { videoId } = req.params;
+      
+      // Check if video is cached
+      const cachedVideo = videoCache.getCachedVideo(videoId);
+      if (!cachedVideo || cachedVideo.downloadStatus !== "completed") {
+        return res.status(404).json({ 
+          message: "Video not found in cache or not fully downloaded" 
+        });
+      }
+
+      // Verify file exists
+      const fs = await import("fs");
+      if (!fs.existsSync(cachedVideo.localPath)) {
+        return res.status(404).json({ 
+          message: "Video file not found on server" 
+        });
+      }
+
+      // Get file stats
+      const stats = fs.statSync(cachedVideo.localPath);
+      
+      // Set appropriate headers for video download
+      // Create a completely safe ASCII filename
+      const cleanFileName = cachedVideo.title
+        .normalize('NFD') // Normalize unicode
+        .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
+        .replace(/[^a-zA-Z0-9\s-]/g, '') // Keep only alphanumeric, spaces, and hyphens
+        .replace(/\s+/g, '_') // Replace spaces with underscores
+        .replace(/_+/g, '_') // Replace multiple underscores with single
+        .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+        .substring(0, 80) // Limit filename length
+        .toLowerCase(); // Convert to lowercase
+      
+      // Use a safe fallback filename if cleaning results in empty string
+      const safeFileName = cleanFileName || `video_${cachedVideo.videoId}`;
+      
+      console.log(`📥 准备下载文件: ${safeFileName}.mp4 (原标题: ${cachedVideo.title})`);
+      
+      res.setHeader("Content-Type", "video/mp4");
+      res.setHeader("Content-Length", stats.size.toString());
+      res.setHeader("Content-Disposition", `attachment; filename="${safeFileName}.mp4"`);
+      res.setHeader("Accept-Ranges", "bytes");
+
+      // Support range requests for video streaming
+      const range = req.headers.range;
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
+        const chunksize = (end - start) + 1;
+        
+        const fileStream = fs.createReadStream(cachedVideo.localPath, { start, end });
+        res.writeHead(206, {
+          "Content-Range": `bytes ${start}-${end}/${stats.size}`,
+          "Content-Length": chunksize.toString(),
+        });
+        
+        fileStream.pipe(res);
+      } else {
+        // Send entire file
+        const fileStream = fs.createReadStream(cachedVideo.localPath);
+        fileStream.pipe(res);
+      }
+
+      // Update last accessed time
+      await storage.updateLastAccessTime(videoId);
+      
+      console.log(`📥 用户下载视频: ${cachedVideo.title} (${videoId})`);
+      
+    } catch (error) {
+      console.error("Error downloading video:", error);
+      res.status(500).json({ message: "Failed to download video" });
+    }
+  });
+
+  // Get video cache status
+  app.get("/api/videos/cache/:videoId", async (req, res) => {
+    try {
+      const { videoId } = req.params;
+      const cachedVideo = videoCache.getCachedVideo(videoId);
+      
+      if (!cachedVideo) {
+        return res.json({ 
+          cached: false, 
+          status: "not_cached" 
+        });
+      }
+
+      res.json({
+        cached: cachedVideo.downloadStatus === "completed",
+        status: cachedVideo.downloadStatus,
+        fileSize: cachedVideo.fileSize,
+        fileName: cachedVideo.fileName,
+        downloadedAt: cachedVideo.downloadedAt,
+      });
+    } catch (error) {
+      console.error("Error getting cache status:", error);
+      res.status(500).json({ message: "Failed to get cache status" });
+    }
+  });
+
+  // Get cache statistics
+  app.get("/api/videos/cache-stats", async (req, res) => {
+    try {
+      const stats = videoCache.getCacheStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Error getting cache stats:", error);
+      res.status(500).json({ message: "Failed to get cache stats" });
+    }
+  });
+
   // Test subtitle library endpoint
   app.get("/api/test/subtitles", async (req, res) => {
     try {
@@ -170,7 +286,7 @@ async function processVideoAnalysis(analysisId: string) {
     console.log("📸 步骤3: 开始生成截图...");
     const timestamps = summarySegments.map(segment => segment.startTime);
     console.log("需要截图的时间点:", timestamps);
-    const screenshotUrls = await generateVideoScreenshots(analysis.videoId, timestamps);
+    const screenshotUrls = await generateVideoScreenshots(analysis.videoId, timestamps, analysis.title);
     console.log("截图生成完成，成功:", screenshotUrls.length, "个");
 
     // Update segments with screenshot URLs

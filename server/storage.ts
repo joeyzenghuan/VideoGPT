@@ -12,6 +12,11 @@ export interface IStorage {
   updateVideoAnalysisStatus(id: string, status: string): Promise<void>;
   updateVideoAnalysis(id: string, analysis: Partial<VideoAnalysis>): Promise<VideoAnalysis | undefined>;
   getAllVideoAnalyses(): Promise<VideoAnalysis[]>;
+  
+  // Video cache operations
+  updateVideoCacheStatus(videoId: string, status: string, localPath?: string, fileSize?: number): Promise<void>;
+  getCachedVideos(): Promise<VideoAnalysis[]>;
+  updateLastAccessTime(videoId: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -64,6 +69,10 @@ export class MemStorage implements IStorage {
       subtitles: (insertAnalysis.subtitles as SubtitleSegment[]) || [],
       summarySegments: (insertAnalysis.summarySegments as SummarySegment[]) || [],
       status: insertAnalysis.status || "processing",
+      localVideoPath: null,
+      videoFileSize: null,
+      videoCacheStatus: "not_cached",
+      lastAccessedAt: null,
       createdAt: new Date(),
     };
     this.videoAnalyses.set(id, analysis);
@@ -89,7 +98,39 @@ export class MemStorage implements IStorage {
   }
 
   async getAllVideoAnalyses(): Promise<VideoAnalysis[]> {
-    return Array.from(this.videoAnalyses.values());
+    const videos: VideoAnalysis[] = [];
+    this.videoAnalyses.forEach(video => videos.push(video));
+    return videos;
+  }
+
+  async updateVideoCacheStatus(videoId: string, status: string, localPath?: string, fileSize?: number): Promise<void> {
+    this.videoAnalyses.forEach((analysis, id) => {
+      if (analysis.videoId === videoId) {
+        analysis.videoCacheStatus = status;
+        if (localPath) analysis.localVideoPath = localPath;
+        if (fileSize) analysis.videoFileSize = fileSize;
+        this.videoAnalyses.set(id, analysis);
+      }
+    });
+  }
+
+  async getCachedVideos(): Promise<VideoAnalysis[]> {
+    const cachedVideos: VideoAnalysis[] = [];
+    this.videoAnalyses.forEach(analysis => {
+      if (analysis.videoCacheStatus === "cached") {
+        cachedVideos.push(analysis);
+      }
+    });
+    return cachedVideos;
+  }
+
+  async updateLastAccessTime(videoId: string): Promise<void> {
+    this.videoAnalyses.forEach((analysis, id) => {
+      if (analysis.videoId === videoId) {
+        analysis.lastAccessedAt = new Date();
+        this.videoAnalyses.set(id, analysis);
+      }
+    });
   }
 }
 
