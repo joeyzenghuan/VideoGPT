@@ -32,3 +32,5 @@ ehthumbs.db
 *.temp
 
 public/screenshots/*
+
+cached-videos/*
