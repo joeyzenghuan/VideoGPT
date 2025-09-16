@@ -7,6 +7,7 @@ import { extractSubtitles, testSubtitleLibrary } from "./services/subtitle";
 import { generateVideoSummary } from "./services/openai";
 import { generateVideoScreenshots } from "./services/screenshot";
 import { videoCache } from "./services/video-cache";
+import { getProgressWebSocket } from "./services/progress-websocket";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Start video analysis
@@ -232,11 +233,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 // Background processing function
 async function processVideoAnalysis(analysisId: string) {
+  const progressWS = getProgressWebSocket();
+  
   try {
     console.log("🚀 开始处理视频分析:", analysisId);
+    progressWS.sendStepUpdate(analysisId, "初始化", 0, "running", "开始处理视频分析...");
+    
     const analysis = await storage.getVideoAnalysis(analysisId);
     if (!analysis) {
       console.error("❌ 分析记录未找到:", analysisId);
+      progressWS.sendStepUpdate(analysisId, "错误", 0, "error", "分析记录未找到");
       return;
     }
 
@@ -244,15 +250,27 @@ async function processVideoAnalysis(analysisId: string) {
     console.log("  视频ID:", analysis.videoId);
     console.log("  标题:", analysis.title);
     console.log("  时长:", analysis.duration, "秒");
+    
+    progressWS.sendStepUpdate(analysisId, "初始化", 5, "completed", `准备分析视频: ${analysis.title}`, {
+      videoId: analysis.videoId,
+      duration: analysis.duration
+    });
 
     // Step 1: Extract subtitles
     console.log("📝 步骤1: 开始提取字幕...");
+    progressWS.sendStepUpdate(analysisId, "字幕提取", 10, "running", "正在提取视频字幕...");
+    
     let subtitles;
     try {
       subtitles = await extractSubtitles(analysis.videoId);
+      progressWS.sendStepUpdate(analysisId, "字幕提取", 25, "completed", `成功提取 ${subtitles.length} 条字幕`, {
+        subtitleCount: subtitles.length
+      });
     } catch (error) {
       console.warn("❌ 字幕提取失败，使用演示数据");
       console.warn("失败原因:", error instanceof Error ? error.message : String(error));
+      progressWS.sendStepUpdate(analysisId, "字幕提取", 20, "running", "字幕提取失败，使用演示数据...");
+      
       subtitles = [
         { start: 0, end: 12, text: "Hello everyone, welcome to today's presentation. I'm excited to share with you some insights about effective storytelling." },
         { start: 12, end: 25, text: "The key to a great story lies in understanding your audience and crafting a narrative that resonates with them." },
@@ -271,23 +289,41 @@ async function processVideoAnalysis(analysisId: string) {
         { start: 205, end: 220, text: "Thank you for your attention. I hope these insights help you become better storytellers." }
       ];
       console.log("✅ 使用演示字幕数据，共", subtitles.length, "条");
+      progressWS.sendStepUpdate(analysisId, "字幕提取", 25, "completed", `使用演示数据: ${subtitles.length} 条字幕`, {
+        subtitleCount: subtitles.length,
+        isDemoData: true
+      });
     }
     
     console.log("💾 保存字幕到数据库...");
     await storage.updateVideoAnalysis(analysisId, { subtitles });
     console.log("✅ 字幕保存完成");
+    progressWS.sendStepUpdate(analysisId, "数据保存", 30, "completed", "字幕数据已保存");
 
     // Step 2: Generate AI summary
     console.log("🤖 步骤2: 开始生成AI总结...");
-    const summarySegments = await generateVideoSummary(analysis.title, subtitles);
+    progressWS.sendStepUpdate(analysisId, "AI分析", 40, "running", "正在使用AI分析视频内容...");
+    
+    const summarySegments = await generateVideoSummary(analysis.title, subtitles, analysisId);
     console.log("✅ AI总结生成完成，共", summarySegments.length, "个段落");
+    progressWS.sendStepUpdate(analysisId, "AI分析", 60, "completed", `AI分析完成，生成 ${summarySegments.length} 个段落`, {
+      segmentCount: summarySegments.length
+    });
 
     // Step 3: Generate screenshots
     console.log("📸 步骤3: 开始生成截图...");
+    progressWS.sendStepUpdate(analysisId, "视频缓存", 65, "running", "正在下载视频到服务器...");
+    
     const timestamps = summarySegments.map(segment => segment.startTime);
     console.log("需要截图的时间点:", timestamps);
+    
+    progressWS.sendStepUpdate(analysisId, "截图生成", 70, "running", `正在生成 ${timestamps.length} 个时间点的截图...`);
     const screenshotUrls = await generateVideoScreenshots(analysis.videoId, timestamps, analysis.title);
     console.log("截图生成完成，成功:", screenshotUrls.length, "个");
+    progressWS.sendStepUpdate(analysisId, "截图生成", 85, "completed", `成功生成 ${screenshotUrls.length} 张截图`, {
+      screenshotCount: screenshotUrls.length,
+      timestamps: timestamps
+    });
 
     // Update segments with screenshot URLs
     console.log("🔗 更新段落截图URL...");
@@ -298,6 +334,8 @@ async function processVideoAnalysis(analysisId: string) {
 
     // Step 4: Update analysis with final results
     console.log("💾 保存最终结果到数据库...");
+    progressWS.sendStepUpdate(analysisId, "完成保存", 90, "running", "保存最终分析结果...");
+    
     await storage.updateVideoAnalysis(analysisId, {
       summarySegments: updatedSegments,
       status: "completed",
@@ -309,12 +347,24 @@ async function processVideoAnalysis(analysisId: string) {
     console.log("  - 总字幕数:", subtitles.length);
     console.log("  - 成功截图数:", screenshotUrls.length);
     console.log("=====================================");
+    
+    progressWS.sendStepUpdate(analysisId, "分析完成", 100, "completed", "🎉 视频分析完成！", {
+      totalSegments: updatedSegments.length,
+      totalSubtitles: subtitles.length,
+      totalScreenshots: screenshotUrls.length,
+      title: analysis.title
+    });
   } catch (error) {
     console.error("❌ 视频分析过程中发生严重错误:");
     console.error("分析ID:", analysisId);
     console.error("错误类型:", error instanceof Error ? error.constructor.name : typeof error);
     console.error("错误信息:", error instanceof Error ? error.message : String(error));
     console.error("错误堆栈:", error instanceof Error ? error.stack : "无堆栈信息");
+
+    progressWS.sendStepUpdate(analysisId, "处理失败", 0, "error", `分析失败: ${error instanceof Error ? error.message : String(error)}`, {
+      errorType: error instanceof Error ? error.constructor.name : typeof error,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
 
     // Update analysis with error status
     try {

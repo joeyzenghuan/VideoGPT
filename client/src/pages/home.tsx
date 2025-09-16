@@ -2,16 +2,26 @@ import { useRef, useState } from "react";
 import { type VideoAnalysis } from "@/lib/types";
 import { Header } from "@/components/header";
 import { UrlInput } from "@/components/url-input";
-import { LoadingState } from "@/components/loading-state";
 import { VideoPlayer } from "@/components/video-player";
 import { SummaryPanel } from "@/components/summary-panel";
 import { FloatingActions } from "@/components/floating-actions";
 import { useVideoAnalysis } from "@/hooks/use-video-analysis";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
+import { SimpleAnalysisProgress } from "@/components/simple-analysis-progress";
 
 export default function Home() {
-  const { analysisState, analysisData, isLoading, startAnalysis, startNewAnalysis, error } = useVideoAnalysis();
+  const { 
+    analysisState, 
+    analysisData, 
+    isLoading, 
+    startAnalysis, 
+    startNewAnalysis, 
+    error,
+    showProgress, 
+    currentAnalysisId, 
+    handleProgressComplete 
+  } = useVideoAnalysis();
   const [currentTime, setCurrentTime] = useState(0);
   const videoPlayerRef = useRef<{ jumpToTime: (time: number) => void }>(null);
 
@@ -49,8 +59,14 @@ export default function Home() {
           <UrlInput onStartAnalysis={handleStartAnalysis} isLoading={isLoading} />
         )}
 
-        {/* Loading State */}
-        {analysisState === "loading" && <LoadingState />}
+        {/* Progress Display */}
+        {analysisState === "loading" && (
+          <SimpleAnalysisProgress 
+            analysisId={currentAnalysisId || 'default'} 
+            isVisible={true}
+            onComplete={handleProgressComplete}
+          />
+        )}
 
         {/* Main Interface */}
         {analysisState === "ready" && analysisData && (

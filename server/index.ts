@@ -12,6 +12,7 @@ if (process.env.NODE_ENV === 'development') {
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { initializeProgressWebSocket } from "./services/progress-websocket";
 
 const app = express();
 app.use(express.json());
@@ -52,6 +53,10 @@ app.use((req, res, next) => {
 
 (async () => {
   const server = await registerRoutes(app);
+  
+  // 初始化WebSocket进度服务
+  initializeProgressWebSocket(server);
+  console.log("📡 WebSocket进度服务已启动");
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

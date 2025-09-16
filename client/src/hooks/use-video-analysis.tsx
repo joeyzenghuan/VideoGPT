@@ -6,6 +6,7 @@ import { type VideoAnalysis, type AnalysisState } from "@/lib/types";
 export function useVideoAnalysis() {
   const [currentAnalysisId, setCurrentAnalysisId] = useState<string | null>(null);
   const [analysisState, setAnalysisState] = useState<AnalysisState>("input");
+  const [showProgress, setShowProgress] = useState(false);
 
   const startAnalysisMutation = useMutation({
     mutationFn: async ({ youtubeUrl, forceRegenerate }: { youtubeUrl: string; forceRegenerate?: boolean }) => {
@@ -18,6 +19,7 @@ export function useVideoAnalysis() {
     onSuccess: (data) => {
       setCurrentAnalysisId(data.id);
       setAnalysisState("loading");
+      setShowProgress(true);
     },
     onError: () => {
       setAnalysisState("error");
@@ -36,6 +38,10 @@ export function useVideoAnalysis() {
         } else {
           setAnalysisState("error");
         }
+        // 保持进度界面显示一会儿，然后隐藏
+        setTimeout(() => {
+          setShowProgress(false);
+        }, 3000);
         return false;
       }
       return 2000; // Poll every 2 seconds
@@ -45,6 +51,14 @@ export function useVideoAnalysis() {
   const startNewAnalysis = () => {
     setCurrentAnalysisId(null);
     setAnalysisState("input");
+    setShowProgress(false);
+  };
+
+  const handleProgressComplete = () => {
+    // 进度完成后，稍等片刻再隐藏进度界面
+    setTimeout(() => {
+      setShowProgress(false);
+    }, 2000);
   };
 
   const startAnalysis = (youtubeUrl: string, forceRegenerate?: boolean) => {
@@ -58,5 +72,8 @@ export function useVideoAnalysis() {
     startAnalysis,
     startNewAnalysis,
     error: startAnalysisMutation.error,
+    showProgress,
+    currentAnalysisId,
+    handleProgressComplete,
   };
 }

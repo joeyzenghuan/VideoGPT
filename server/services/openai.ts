@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { type SubtitleSegment, type SummarySegment } from "@shared/schema";
+import { getProgressWebSocket } from "./progress-websocket";
 
 // OpenAI实例，延迟初始化
 let openai: OpenAI | null = null;
@@ -38,12 +39,23 @@ function getOpenAIInstance(): OpenAI {
 
 export async function generateVideoSummary(
   title: string,
-  subtitles: SubtitleSegment[]
+  subtitles: SubtitleSegment[],
+  analysisId?: string
 ): Promise<SummarySegment[]> {
   try {
+    const progressWS = getProgressWebSocket();
+    
     console.log("=== 开始生成AI总结 ===");
     console.log("视频标题:", title);
     console.log("字幕数量:", subtitles.length);
+    
+    // 推送字幕信息
+    if (analysisId) {
+      progressWS.sendStepUpdate(analysisId, "AI分析", 42, "running", "准备字幕数据...", {
+        subtitlesCount: subtitles.length,
+        title: title
+      });
+    }
     
     const subtitleText = subtitles.map(sub => 
       `[${formatTime(sub.start)}] ${sub.text}`
@@ -52,6 +64,14 @@ export async function generateVideoSummary(
     console.log("字幕文本长度:", subtitleText.length, "字符");
     console.log("字幕文本前500字符:", subtitleText.substring(0, 500));
     console.log("字幕文本后200字符:", subtitleText.substring(Math.max(0, subtitleText.length - 200)));
+
+    // 推送字幕预览
+    if (analysisId) {
+      progressWS.sendStepUpdate(analysisId, "AI分析", 45, "running", "分析字幕内容...", {
+        subtitlePreview: subtitleText.substring(0, 300) + (subtitleText.length > 300 ? "..." : ""),
+        totalLength: subtitleText.length
+      });
+    }
 
     const prompt = `
 请分析以下YouTube视频的字幕内容，将其按主题分成4-6个逻辑段落。视频标题：${title}
@@ -85,8 +105,24 @@ ${subtitleText}
     console.log("---prompt结束---");
     console.log("Prompt长度:", prompt.length, "字符");
 
+    // 推送prompt信息
+    if (analysisId) {
+      progressWS.sendStepUpdate(analysisId, "AI分析", 48, "running", "构建AI分析提示...", {
+        promptLength: prompt.length,
+        promptPreview: prompt.substring(0, 200) + (prompt.length > 200 ? "..." : "")
+      });
+    }
+
     console.log("🔄 正在调用OpenAI API...");
     const startTime = Date.now();
+
+    // 推送API调用开始
+    if (analysisId) {
+      progressWS.sendStepUpdate(analysisId, "AI分析", 50, "running", "正在调用AI分析服务...", {
+        model: process.env.OPENAI_MODEL_NAME,
+        startTime: new Date().toLocaleTimeString()
+      });
+    }
 
     const openaiInstance = getOpenAIInstance();
     const response = await openaiInstance.chat.completions.create({
@@ -106,7 +142,8 @@ ${subtitleText}
     });
 
     const endTime = Date.now();
-    console.log("✅ OpenAI API调用完成，耗时:", endTime - startTime, "ms");
+    const duration = endTime - startTime;
+    console.log("✅ OpenAI API调用完成，耗时:", duration, "ms");
     
     const rawResponse = response.choices[0].message.content || "{}";
     console.log("📥 LLM原始响应内容:");
@@ -114,6 +151,15 @@ ${subtitleText}
     console.log(rawResponse);
     console.log("---响应结束---");
     console.log("响应长度:", rawResponse.length, "字符");
+
+    // 推送API响应信息
+    if (analysisId) {
+      progressWS.sendStepUpdate(analysisId, "AI分析", 55, "running", "收到AI分析结果...", {
+        duration: duration,
+        responseLength: rawResponse.length,
+        responsePreview: rawResponse.substring(0, 200) + (rawResponse.length > 200 ? "..." : "")
+      });
+    }
 
     console.log("🔄 开始解析JSON响应...");
     const result = JSON.parse(rawResponse);
@@ -127,6 +173,19 @@ ${subtitleText}
     }
 
     console.log("✅ 找到", result.segments.length, "个段落");
+
+    // 推送解析结果
+    if (analysisId) {
+      progressWS.sendStepUpdate(analysisId, "AI分析", 58, "running", "解析AI分析结果...", {
+        segmentsFound: result.segments.length,
+        segments: result.segments.map((seg: any, index: number) => ({
+          index: index + 1,
+          title: seg.title,
+          timeRange: `${seg.startTime}s - ${seg.endTime}s`,
+          summaryLength: seg.aiSummary?.length || 0
+        }))
+      });
+    }
 
     // Map the segments and include relevant subtitles for each
     console.log("🔄 开始处理段落并分配字幕...");
